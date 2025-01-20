@@ -1,0 +1,259 @@
+#include <LiquidCrystal.h>
+
+// LCD connections
+LiquidCrystal lcd(12, 11, 5, 4, 3, 2);
+
+// Pin definitions
+const int relayPin = 10; // Releul conectat la pinul D10
+const int tempSensorPin = A0;
+
+// Threshold temperatures
+const int tempOn = 50;  // Temperature to turn the relay ON
+const int tempOff = 55; // Temperature to turn the relay OFF
+
+void setup() {
+  // Initialize pins
+  pinMode(relayPin, OUTPUT);
+  digitalWrite(relayPin, LOW); // Relay starts OFF
+
+  // Initialize LCD
+  lcd.begin(16, 2);
+  lcd.print("Initializing...");
+  delay(2000);
+  lcd.clear();#include <LiquidCrystal.h>
+
+// LCD connections
+LiquidCrystal lcd(12, 11, 5, 4, 3, 2);
+
+// Pin definitions
+const int relayPin = 10;  // Releul conectat la pinul D10
+const int tempSensorPin = A0;  // Senzorul de temperatură conectat la pinul A0
+
+// Button pins
+const int buttonOk = 8;    // Buton OK pe D8
+const int buttonCancel = 9; // Buton Cancel pe D9
+const int buttonPlus = 6;   // Buton + pe D6
+const int buttonMinus = 7;  // Buton - pe D7
+
+// Threshold temperatures
+const int tempOn = 50;  // Temperatura pentru a porni releul
+const int defaultTempOff = 55; // Temperatura implicită pentru a opri releul
+const int coolingThreshold = 40; // Temperatura la care răcirea este completă
+int tempOff = defaultTempOff;  // Temperatura ajustabilă
+
+bool editing = false;         // Stare editare temperatură
+int adjustedTemp = tempOff;   // Temperatura ajustată
+
+// Heating and cooling time tracking
+unsigned long startTimeHeating = 0;   // Momentul când releul se pornește
+unsigned long heatingDuration = 0;    // Durata încălzirii
+unsigned long startTimeCooling = 0;   // Momentul când răcirea începe
+unsigned long coolingDuration = 0;    // Durata răcirii
+
+bool isRelayOn = false;       // Stare releu
+bool cancelPressed = false;   // Flag pentru starea butonului Cancel
+bool coolingActive = false;   // Flag pentru starea de răcire
+
+void setup() {
+  // Initialize pins
+  pinMode(relayPin, OUTPUT);
+  digitalWrite(relayPin, LOW); // Releul începe oprit
+
+  pinMode(buttonOk, INPUT_PULLUP);
+  pinMode(buttonCancel, INPUT_PULLUP);
+  pinMode(buttonPlus, INPUT_PULLUP);
+  pinMode(buttonMinus, INPUT_PULLUP);
+
+  // Initialize LCD
+  lcd.begin(16, 2);
+  lcd.print("Initializing...");
+  delay(2000);
+  lcd.clear();
+}
+
+void loop() {
+  // Read temperature from sensor
+  double temperature = readTemperature();
+
+  // Display current temperature on LCD
+  lcd.setCursor(0, 0);
+  lcd.print("Temp: ");
+  lcd.print(temperature);
+  lcd.print("C  ");
+
+  // Handle button presses
+  handleButtons();
+
+  // Control relay based on temperature
+  if (!editing && !cancelPressed) {  // Only control relay if not in edit mode and Cancel not pressed
+    if (temperature >= tempOff && isRelayOn) {
+      digitalWrite(relayPin, LOW); // Turn relay OFF
+      isRelayOn = false;
+      heatingDuration = millis() - startTimeHeating; // Finalize heating time
+      coolingActive = true; // Start cooling mode
+      startTimeCooling = millis(); // Start cooling timer
+    } else if (temperature <= tempOn && !isRelayOn) {
+      digitalWrite(relayPin, HIGH); // Turn relay ON
+      isRelayOn = true;
+      startTimeHeating = millis(); // Start tracking heating time
+      coolingActive = false; // Stop cooling mode
+      coolingDuration = 0; // Reset cooling duration
+    }
+
+    // Update heating duration if the relay is ON
+    if (isRelayOn) {
+      heatingDuration = millis() - startTimeHeating;
+    }
+
+    // Update cooling duration if cooling is active
+    if (coolingActive) {
+      coolingDuration = millis() - startTimeCooling;
+
+      // Reset cooling duration if temperature reaches cooling threshold
+      if (temperature <= coolingThreshold) {
+        coolingActive = false;
+        coolingDuration = 0;
+      }
+    }
+  }
+
+  // Display time on LCD (Only when not in edit mode and no cancel)
+  if (!editing && !cancelPressed) {
+    lcd.setCursor(0, 1);
+    if (isRelayOn) {
+      lcd.print("Heating: ");
+      lcd.print(heatingDuration / 1000); // Convert to seconds
+      lcd.print("s       ");
+    } else if (coolingActive) {
+      lcd.print("Cooling: ");
+      lcd.print(coolingDuration / 1000); // Convert to seconds
+      lcd.print("s       ");
+    } else {
+      lcd.print("Idle            "); // Clear LCD when idle
+    }
+  } else {
+    // When in edit mode, just show the current adjusted temperature
+    lcd.setCursor(0, 1);
+    lcd.print("Set Temp: ");
+    lcd.print(adjustedTemp);
+    lcd.print("C         ");
+  }
+
+  delay(200); // Small delay for stability
+}
+
+// Function to read temperature from LM35 sensor
+double readTemperature() {
+  int sensorValue = analogRead(tempSensorPin);
+  double voltage = sensorValue * 5.0 / 1023.0; // Convert to voltage
+  double temperature = voltage * 100;         // Convert to Celsius
+  return temperature;
+}
+
+// Handle button presses
+void handleButtons() {
+  // Check for "+" button press
+  if (digitalRead(buttonPlus) == LOW) {
+    delay(200); // Debounce (delay to avoid multiple reads)
+    if (editing) {
+      adjustedTemp++; // Increase adjusted temperature by 1°C
+      lcd.setCursor(0, 1);
+      lcd.print("Set Temp: ");
+      lcd.print(adjustedTemp);
+      lcd.print("C         ");
+    }
+  }
+
+  // Check for "-" button press
+  if (digitalRead(buttonMinus) == LOW) {
+    delay(200); // Debounce (delay to avoid multiple reads)
+    if (editing) {
+      adjustedTemp--; // Decrease adjusted temperature by 1°C
+      lcd.setCursor(0, 1);
+      lcd.print("Set Temp: ");
+      lcd.print(adjustedTemp);
+      lcd.print("C         ");
+    }
+  }
+
+  // Check for "OK" button press
+  if (digitalRead(buttonOk) == LOW) {
+    delay(200); // Debounce (delay to avoid multiple reads)
+    if (editing) {
+      tempOff = adjustedTemp; // Confirm adjusted temperature
+      editing = false;        // Exit edit mode
+      lcd.setCursor(0, 1);
+      lcd.print("Temp Set: ");
+      lcd.print(tempOff);
+      lcd.print("C         ");
+      delay(1000);
+    } else {
+      editing = true; // Enter edit mode
+      lcd.setCursor(0, 1);
+      lcd.print("Adjusting...     ");
+    }
+  }
+
+  // Check for "Cancel" button press
+  if (digitalRead(buttonCancel) == LOW) {
+    delay(200); // Debounce (delay to avoid multiple reads)
+    if (editing) {
+      adjustedTemp = tempOff; // Reset adjusted temperature to original
+      editing = false;        // Exit edit mode
+    } else if (cancelPressed) {
+      cancelPressed = false;  // Resume normal operation
+      lcd.setCursor(0, 1);
+      lcd.print("Resuming...     ");
+      delay(1000);
+    } else {
+      cancelPressed = true;   // Stop time tracking and keep current duration
+      digitalWrite(relayPin, LOW); // Turn relay OFF
+      isRelayOn = false;      // Ensure relay is off
+      coolingActive = false;  // Stop cooling mode
+      adjustedTemp = defaultTempOff;  // Reset to default temperature value
+      lcd.setCursor(0, 1);
+      lcd.print("Temp Reset: ");
+      lcd.print(adjustedTemp);
+      lcd.print("C         ");
+      delay(1000);
+    }
+  }
+}
+
+}
+
+void loop() {
+  // Read temperature from sensor
+  double temperature = readTemperature();
+
+  // Display temperature on LCD
+  lcd.setCursor(0, 0);
+  lcd.print("Temp: ");
+  lcd.print(temperature);
+  lcd.print("C  ");
+
+  // Control relay based on temperature
+  if (temperature >= tempOff) {
+    digitalWrite(relayPin, LOW); // Turn relay OFF (stop heating)
+    lcd.setCursor(0, 1);
+    lcd.print("Relay: OFF      ");
+  } else if (temperature <= tempOn) {
+    digitalWrite(relayPin, HIGH); // Turn relay ON (start heating)
+    lcd.setCursor(0, 1);
+    lcd.print("Relay: ON       ");
+  }
+
+  // Debug: Display pin state on LCD
+  lcd.setCursor(10, 1);
+  lcd.print(digitalRead(relayPin) == HIGH ? "H" : "L");
+
+  delay(500); // Small delay for stability
+}
+
+// Function to read temperature from LM35 sensor
+double readTemperature() {
+  int sensorValue = analogRead(tempSensorPin);
+  double voltage = sensorValue * 5.0 / 1023.0; // Convert to voltage
+  double temperature = voltage * 100;         // Convert to Celsius
+  return temperature;
+}
